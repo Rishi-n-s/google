@@ -19,8 +19,14 @@ window.GSA_DATA = {
     sessionDate: "November 2026",
     toolUsed: "Google Gemini 1.5 Pro & Gemini Canvas",
     promptText: "Act as an innovative game concept designer. Create a unique campus game that blends physical exploration with real-time AI clues using Google Gemini. Outline the core rules, team scoring, and a 3-step interactive prototype plan.",
+    // Product Trial Links
     productTrialPreSurvey: "https://producttrialsurvey.geministudentambassador.com/",
-    productTrialFeedback: "https://producttrialfeedback.geministudentambassador.com/"
+    productTrialFeedback: "https://producttrialfeedback.geministudentambassador.com/",
+    // Product Understanding Links
+    productUnderstandingPreSurvey: "https://productunderstandingpre.geministudentambassador.com/",
+    productUnderstandingPostSurvey: "https://productunderstandingpost.geministudentambassador.com/",
+    productUnderstandingTutorialDrive: "https://drive.google.com/drive/folders/1kMIfA74eTwhtdb3NXB0-6q7PD8BLxeGV",
+    productUnderstandingVideoSubmission: "https://productunderstanding.geministudentambassador.com"
   },
 
   // Reward Tiers & Milestones
@@ -252,10 +258,13 @@ window.GSA_DATA = {
       ]
     },
     {
-      section: "2. Official Survey & Feedback Forms (Product Trials)",
+      section: "2. Official Survey & Feedback Forms",
       links: [
         { label: "Product Trials", name: "Step 1 – Pre-Survey Form", url: "https://producttrialsurvey.geministudentambassador.com/", highlight: true },
-        { label: "Product Trials", name: "Step 4 – Participant Feedback Form", url: "https://producttrialfeedback.geministudentambassador.com/", highlight: true }
+        { label: "Product Trials", name: "Step 4 – Participant Feedback Form", url: "https://producttrialfeedback.geministudentambassador.com/", highlight: true },
+        { label: "Product Understanding", name: "Pre-Survey Form", url: "https://productunderstandingpre.geministudentambassador.com/", highlight: true },
+        { label: "Product Understanding", name: "Post-Survey Form", url: "https://productunderstandingpost.geministudentambassador.com/", highlight: true },
+        { label: "Product Understanding", name: "Video Submission Form", url: "https://productunderstanding.geministudentambassador.com" }
       ]
     },
     {

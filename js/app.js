@@ -438,6 +438,43 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
+        <!-- Section 3.5: Product Understanding & Study Notebook Links -->
+        <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-4">
+          <div class="flex items-center justify-between pb-2 border-b border-gray-100">
+            <div>
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">1-on-1 Sessions</span>
+              <h2 class="text-lg font-bold text-gray-900">Product Understanding (Study Notebooks)</h2>
+              <p class="text-xs text-gray-500">Participating in a Study Notebook walkthrough session? Access your pre/post surveys and tutorials below:</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <a href="${sess.productUnderstandingPreSurvey}" target="_blank" rel="noopener noreferrer" class="p-3.5 rounded-2xl border border-gray-200 hover:border-[#346BF1] hover:bg-blue-50/30 transition-all flex items-center justify-between group">
+              <div>
+                <span class="text-[11px] text-gray-400 block font-medium">Study Notebooks</span>
+                <span class="font-bold text-sm text-gray-800 group-hover:text-[#346BF1]">Pre-Survey Form</span>
+              </div>
+              <i data-lucide="external-link" class="w-4 h-4 text-gray-400 group-hover:text-[#346BF1]"></i>
+            </a>
+
+            <a href="${sess.productUnderstandingPostSurvey}" target="_blank" rel="noopener noreferrer" class="p-3.5 rounded-2xl border border-gray-200 hover:border-[#346BF1] hover:bg-blue-50/30 transition-all flex items-center justify-between group">
+              <div>
+                <span class="text-[11px] text-gray-400 block font-medium">Study Notebooks</span>
+                <span class="font-bold text-sm text-gray-800 group-hover:text-[#346BF1]">Post-Survey Form</span>
+              </div>
+              <i data-lucide="external-link" class="w-4 h-4 text-gray-400 group-hover:text-[#346BF1]"></i>
+            </a>
+
+            <a href="${sess.productUnderstandingTutorialDrive}" target="_blank" rel="noopener noreferrer" class="p-3.5 rounded-2xl border border-blue-200 bg-blue-50/30 hover:border-[#346BF1] hover:bg-blue-50/50 transition-all flex items-center justify-between group sm:col-span-2">
+              <div>
+                <span class="text-[11px] text-[#346BF1] block font-bold uppercase tracking-wider">Video Guides</span>
+                <span class="font-bold text-sm text-gray-900 group-hover:text-[#346BF1]">Study Notebook Tutorial Videos (Google Drive Folder)</span>
+              </div>
+              <i data-lucide="external-link" class="w-4 h-4 text-[#346BF1]"></i>
+            </a>
+          </div>
+        </div>
+
         <!-- Section 4: Issue Your Official Certificate -->
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">
           <div class="flex items-center justify-between pb-3 border-b border-gray-100">
