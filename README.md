@@ -17,7 +17,7 @@ Switch seamlessly between roles using the toggle in the top header:
 - **My Score & Leaderboard**: Real-time points breakdown and standings.
 
 ### 2. Student Participant View
-Participants are locked to an attendee experience:
+Participants are locked strictly to the **Product Trial & Certificate Hub**:
 - **Ambassador Details for Forms**: 1-click **Copy** buttons for Ambassador Name, Google ID (GID), Campus, and Workshop Theme to paste directly into Google Forms.
 - **Gemini Creative Prompt**: Ready-to-test text prompt for the workshop with 1-click copy.
 - **Product Trial Surveys**:
@@ -26,8 +26,7 @@ Participants are locked to an attendee experience:
   - **Step 3**: [Product Trial Participant Feedback Form](https://producttrialfeedback.geministudentambassador.com/)
 - **Certificate Verification & Issuance**:
   - Certificate generation is strictly locked until students confirm completing the **Product Trial** surveys (Pre-Survey and Feedback form) and enter their full name.
-  - Generates a 1600×1000 print-quality **Official Certificate of Participation** endorsed by the campus ambassador, downloadable as high-resolution PNG or printable.
-- **Resources Page Access**: Direct access to tutorial videos, brand guides, and collateral.
+  - Generates a 1600×1000 print-quality **Official Certificate of Participation** with the official Google Gemini Sparkle seal and ambassador endorsement, downloadable as high-resolution PNG or printable.
 
 ---
 

@@ -139,6 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Tab Switcher
   window.switchTab = function(tabName) {
+    if (AppState.role === 'participant') {
+      tabName = 'participantHub';
+    }
     AppState.currentTab = tabName;
     if (window.innerWidth < 1024) {
       closeSidebar();
@@ -224,10 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
         </button>
       `;
     } else {
-      // Participant navigation (Only sees Product Trial & Certificate, and Resources)
+      // Participant navigation (Only sees Product Trial & Certificate)
       const items = [
-        { id: 'participantHub', label: 'Product Trial & Certificate' },
-        { id: 'resources', label: 'Resources' }
+        { id: 'participantHub', label: 'Product Trial & Certificate' }
       ];
 
       nav.innerHTML = items.map(item => {
@@ -257,11 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const main = document.getElementById('main-content');
 
     if (AppState.role === 'participant') {
-      if (AppState.currentTab === 'resources') {
-        main.innerHTML = renderResourcesView();
-      } else {
-        main.innerHTML = renderParticipantHub();
-      }
+      main.innerHTML = renderParticipantHub();
     } else {
       switch (AppState.currentTab) {
         case 'home':
