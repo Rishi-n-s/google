@@ -1,6 +1,14 @@
 /* Google Gemini Student Ambassador Portal Stylesheet */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=Cinzel:wght@600;700;800&display=swap');
 
+/* Supplied with the certificate artwork. Keeping it local makes exported
+   certificates independent of a network font request. */
+@font-face {
+  font-family: 'Google Sans Certificate';
+  src: url('../assets/certifications/GoogleSans-Bold.ttf') format('truetype');
+  font-display: swap;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: #F8FAFF;

@@ -4,11 +4,15 @@
 document.addEventListener('DOMContentLoaded', () => {
   // Application State
   const AppState = {
-    role: localStorage.getItem('GSA_ROLE') || 'ambassador', // 'ambassador' | 'participant'
+    session: JSON.parse(localStorage.getItem('GSA_SESSION') || 'null'),
+    role: 'participant', // Set only after the entry gate is completed.
     profile: JSON.parse(localStorage.getItem('GSA_USER_PROFILE')) || { ...window.GSA_DATA.defaultProfile },
     tasks: JSON.parse(localStorage.getItem('GSA_USER_TASKS')) || JSON.parse(JSON.stringify(window.GSA_DATA.tasks)),
     currentTab: 'home',
     sidebarOpen: false,
+    selectedPromptId: localStorage.getItem('GSA_SELECTED_PROMPT') || 'ember-run',
+    selectedAmbassadorId: localStorage.getItem('GSA_SELECTED_AMBASSADOR') || '',
+    ambassadorScores: JSON.parse(localStorage.getItem('GSA_AMBASSADOR_SCORES') || '{}'),
 
     // Participant verification state
     participant: JSON.parse(localStorage.getItem('GSA_PARTICIPANT')) || {
@@ -22,9 +26,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     save() {
       localStorage.setItem('GSA_ROLE', this.role);
+      if (this.session) {
+        localStorage.setItem('GSA_SESSION', JSON.stringify(this.session));
+      } else {
+        localStorage.removeItem('GSA_SESSION');
+      }
       localStorage.setItem('GSA_USER_PROFILE', JSON.stringify(this.profile));
       localStorage.setItem('GSA_USER_TASKS', JSON.stringify(this.tasks));
       localStorage.setItem('GSA_PARTICIPANT', JSON.stringify(this.participant));
+      localStorage.setItem('GSA_SELECTED_PROMPT', this.selectedPromptId);
+      localStorage.setItem('GSA_SELECTED_AMBASSADOR', this.selectedAmbassadorId);
+      localStorage.setItem('GSA_AMBASSADOR_SCORES', JSON.stringify(this.ambassadorScores));
       this.updateHeader();
     },
 
@@ -73,6 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
     },
 
     get totalScore() {
+      const ambassadorId = this.session && this.session.role === 'ambassador' ? this.session.ambassadorId : '';
+      if (ambassadorId && Number.isFinite(Number(this.ambassadorScores[ambassadorId]))) {
+        return Number(this.ambassadorScores[ambassadorId]);
+      }
+      if (ambassadorId) return 0;
       return this.tasks.reduce((sum, task) => sum + this.calculateTaskScore(task), 0);
     },
 
@@ -90,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHeader() {
       const scorePill = document.getElementById('header-score-pill');
       if (scorePill) {
-        scorePill.textContent = `Score: ${this.totalScore} pts`;
+        scorePill.textContent = window.GSA_REQUIRE_SCORE ? 'Set current score' : `Score: ${this.totalScore} pts`;
       }
 
       const ambActions = document.getElementById('header-ambassador-actions');
@@ -112,10 +129,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  AppState.role = AppState.session ? AppState.session.role : 'participant';
+
   window.AppState = AppState;
 
-  // Role Switcher Handler
+  // The role is established at sign-in. It cannot be changed from the portal UI.
   window.setRole = function(newRole) {
+    if (!AppState.session || newRole !== AppState.session.role) {
+      return;
+    }
     AppState.role = newRole;
     AppState.save();
 
@@ -126,7 +148,108 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderApp();
-    showToast(`Switched to ${newRole === 'ambassador' ? 'Ambassador Dashboard' : 'Student Participant Hub'}`);
+  };
+
+  function setAuthenticatedShell(isAuthenticated) {
+    const header = document.getElementById('portal-header');
+    const sidebar = document.getElementById('portal-sidebar');
+    const chat = document.getElementById('gsa-chat-widget');
+    const roleSwitcher = document.getElementById('role-switcher');
+    if (header) header.classList.toggle('hidden', !isAuthenticated);
+    if (sidebar) sidebar.classList.toggle('hidden', !isAuthenticated);
+    if (chat) chat.classList.toggle('hidden', !isAuthenticated);
+    if (roleSwitcher) roleSwitcher.classList.add('hidden');
+  }
+
+  window.selectLoginMode = function(mode) {
+    window.GSA_LOGIN_MODE = mode;
+    renderApp();
+  };
+
+  window.submitParticipantLogin = function(event) {
+    event.preventDefault();
+    const name = document.getElementById('login-participant-name').value.trim();
+    const university = document.getElementById('login-participant-university').value.trim();
+    if (name.length < 2 || university.length < 2) {
+      const error = document.getElementById('login-error');
+      if (error) error.textContent = 'Enter your full name and university to continue.';
+      return;
+    }
+
+    AppState.session = { role: 'participant', name, university };
+    AppState.role = 'participant';
+    AppState.participant = {
+      name,
+      college: university,
+      preSurveyFilled: false,
+      trialDone: false,
+      feedbackFilled: false,
+      certificateIssued: false
+    };
+    AppState.selectedAmbassadorId = '';
+    AppState.currentTab = 'participantHub';
+    AppState.save();
+    renderApp();
+  };
+
+  window.submitAmbassadorLogin = function(event) {
+    event.preventDefault();
+    const ambassadorId = document.getElementById('login-ambassador-id').value;
+    const password = document.getElementById('login-ambassador-password').value;
+    const ambassador = (window.GSA_DATA.ambassadors || []).find(item => item.id === ambassadorId);
+    const error = document.getElementById('login-error');
+    if (!ambassador || ambassador.password !== password) {
+      if (error) error.textContent = 'The ambassador credentials do not match. Please try again.';
+      return;
+    }
+
+    AppState.session = { role: 'ambassador', ambassadorId, name: ambassador.name };
+    AppState.role = 'ambassador';
+    AppState.profile = { ...window.GSA_DATA.defaultProfile, ...ambassador };
+    AppState.currentTab = 'home';
+    window.GSA_REQUIRE_SCORE = true;
+    AppState.save();
+    renderApp();
+  };
+
+  window.submitAmbassadorScore = function(event) {
+    event.preventDefault();
+    const input = document.getElementById('ambassador-current-score');
+    const score = Number(input.value);
+    const error = document.getElementById('score-entry-error');
+    if (!Number.isFinite(score) || score < 0) {
+      if (error) error.textContent = 'Enter a valid score of 0 or more.';
+      return;
+    }
+    AppState.ambassadorScores[AppState.session.ambassadorId] = Math.floor(score);
+    AppState.save();
+    window.GSA_REQUIRE_SCORE = false;
+    renderApp();
+  };
+
+  window.logout = function() {
+    AppState.session = null;
+    AppState.role = 'participant';
+    AppState.selectedAmbassadorId = '';
+    AppState.sidebarOpen = false;
+    AppState.save();
+    renderApp();
+  };
+
+  window.selectParticipantAmbassador = function(ambassadorId) {
+    const ambassador = (window.GSA_DATA.ambassadors || []).find(item => item.id === ambassadorId);
+    if (!ambassador) return;
+
+    AppState.selectedAmbassadorId = ambassadorId;
+    AppState.save();
+    renderApp();
+    showToast(`You're joining ${ambassador.name}'s contest`);
+  };
+
+  window.changeParticipantAmbassador = function() {
+    AppState.selectedAmbassadorId = '';
+    AppState.save();
+    renderApp();
   };
 
   window.handleLogoClick = function() {
@@ -171,6 +294,37 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(`Selected: ${text}`);
     });
   };
+
+  // Master Prompt Selector
+  window.selectMasterPrompt = function(promptId) {
+    AppState.selectedPromptId = promptId;
+    AppState.save();
+    renderApp();
+    const found = (window.GSA_DATA.masterPrompts || []).find(p => p.id === promptId);
+    showToast(`Loaded: ${found ? found.title : promptId}`);
+  };
+
+  // Copy All Form Answers formatted
+  window.copyAllFormAnswers = function() {
+      const prompts = window.GSA_DATA.masterPrompts || [];
+      const cur = prompts.find(p => p.id === AppState.selectedPromptId) || prompts[0];
+      if (!cur) return;
+
+      const payload = [
+        `What is your Game Idea Concept ? (Your Build):\n${cur.yourBuild}`,
+        `Your Nano Banana Prompt:\n${cur.nanoPrompt}`,
+        `Key Follow-up Prompts:\n${cur.followUpPrompts.join('\n\n')}`,
+        `The Idea (How did you use above mentioned tools? Feature Wishlist):\n${cur.theIdea}`,
+        `The Friction (Challenge & Workaround):\n${cur.theFriction}`,
+        `The Win (What came together beautifully):\n${cur.theWin}`
+      ].join('\n\n---\n\n');
+
+      navigator.clipboard.writeText(payload).then(() => {
+        showToast('Copied all 6 form answers to clipboard!');
+      }).catch(() => {
+        showToast('Error copying answers');
+      });
+    };
 
   // Mobile Sidebar
   window.toggleSidebar = function() {
@@ -221,7 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }).join('');
 
       footer.innerHTML = `
-        <button onclick="AppState.reset()" class="flex items-center space-x-2 w-full px-5 py-3 text-gray-500 hover:text-gray-900 text-sm font-medium transition-colors rounded-2xl hover:bg-gray-50">
+        <button onclick="logout()" class="flex items-center space-x-2 w-full px-5 py-3 text-gray-500 hover:text-gray-900 text-sm font-medium transition-colors rounded-2xl hover:bg-gray-50">
           <i data-lucide="log-out" class="w-4 h-4 text-gray-400"></i>
           <span>Logout</span>
         </button>
@@ -244,22 +398,109 @@ document.addEventListener('DOMContentLoaded', () => {
       }).join('');
 
       footer.innerHTML = `
-        <button onclick="setRole('ambassador')" class="flex items-center space-x-2 w-full px-5 py-3 text-[#346BF1] hover:bg-blue-50 text-xs font-bold transition-colors rounded-2xl">
-          <i data-lucide="shield" class="w-4 h-4"></i>
-          <span>Switch to Ambassador</span>
+        <button onclick="logout()" class="flex items-center space-x-2 w-full px-5 py-3 text-gray-500 hover:text-gray-900 text-sm font-medium transition-colors rounded-2xl hover:bg-gray-50">
+          <i data-lucide="log-out" class="w-4 h-4 text-gray-400"></i>
+          <span>Logout</span>
         </button>
       `;
     }
   }
 
+  function renderLoginView() {
+    const mode = window.GSA_LOGIN_MODE || 'participant';
+    const ambassadors = window.GSA_DATA.ambassadors || [];
+    const participantForm = `
+      <form onsubmit="submitParticipantLogin(event)" class="space-y-4">
+        <div>
+          <label for="login-participant-name" class="block text-sm font-semibold text-gray-800 mb-1.5">Full name</label>
+          <input id="login-participant-name" type="text" autocomplete="name" required placeholder="Enter your full name" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div>
+          <label for="login-participant-university" class="block text-sm font-semibold text-gray-800 mb-1.5">University or institute</label>
+          <input id="login-participant-university" type="text" autocomplete="organization" required placeholder="Enter your university" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+        </div>
+        <button type="submit" class="w-full px-5 py-3 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] active:translate-y-px text-white font-bold text-sm transition-colors">Continue as participant</button>
+      </form>`;
+    const ambassadorForm = `
+      <form onsubmit="submitAmbassadorLogin(event)" class="space-y-4">
+        <div>
+          <label for="login-ambassador-id" class="block text-sm font-semibold text-gray-800 mb-1.5">Ambassador account</label>
+          <select id="login-ambassador-id" class="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+            ${ambassadors.map(ambassador => `<option value="${ambassador.id}">${ambassador.name}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label for="login-ambassador-password" class="block text-sm font-semibold text-gray-800 mb-1.5">Password</label>
+          <input id="login-ambassador-password" type="password" autocomplete="current-password" required placeholder="Enter your password" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+        </div>
+        <button type="submit" class="w-full px-5 py-3 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] active:translate-y-px text-white font-bold text-sm transition-colors">Sign in as ambassador</button>
+      </form>`;
+
+    return `
+      <div class="min-h-full flex items-center justify-center py-8">
+        <section class="w-full max-w-md rounded-3xl bg-white border border-gray-200 shadow-xl shadow-blue-950/5 overflow-hidden">
+          <div class="p-7 sm:p-8 bg-[#F8FAFF] border-b border-blue-100 text-center">
+            <img src="assets/logo-04-header.png" alt="Google Gemini Student Ambassador" class="h-12 w-auto mx-auto object-contain">
+            <h1 class="mt-5 text-2xl font-bold tracking-tight text-gray-900">Welcome to the GSA portal</h1>
+            <p class="mt-2 text-sm text-gray-600">Start by identifying how you are joining today.</p>
+          </div>
+          <div class="p-6 sm:p-8">
+            <div class="grid grid-cols-2 gap-2 p-1 rounded-xl bg-gray-100 mb-6">
+              <button type="button" onclick="selectLoginMode('participant')" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-colors ${mode === 'participant' ? 'bg-white text-[#346BF1] shadow-sm' : 'text-gray-500 hover:text-gray-900'}">Participant</button>
+              <button type="button" onclick="selectLoginMode('ambassador')" class="px-3 py-2.5 rounded-lg text-xs font-bold transition-colors ${mode === 'ambassador' ? 'bg-white text-[#346BF1] shadow-sm' : 'text-gray-500 hover:text-gray-900'}">Ambassador</button>
+            </div>
+            <p id="login-error" role="alert" class="min-h-5 mb-3 text-xs font-medium text-red-600"></p>
+            ${mode === 'participant' ? participantForm : ambassadorForm}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function renderAmbassadorScoreSetup() {
+    const ambassador = (window.GSA_DATA.ambassadors || []).find(item => item.id === AppState.session.ambassadorId);
+    return `
+      <div class="min-h-full flex items-center justify-center py-8">
+        <section class="w-full max-w-md rounded-3xl bg-white border border-gray-200 shadow-xl shadow-blue-950/5 overflow-hidden">
+          <div class="p-7 sm:p-8 bg-[#F8FAFF] border-b border-blue-100">
+            <p class="text-xs font-bold tracking-wide text-[#346BF1]">AMBASSADOR DASHBOARD</p>
+            <h1 class="mt-2 text-2xl font-bold tracking-tight text-gray-900">Welcome, ${ambassador ? ambassador.name : 'Ambassador'}</h1>
+            <p class="mt-2 text-sm text-gray-600">Before opening your dashboard, enter your current programme score.</p>
+          </div>
+          <form onsubmit="submitAmbassadorScore(event)" class="p-6 sm:p-8 space-y-4">
+            <div>
+              <label for="ambassador-current-score" class="block text-sm font-semibold text-gray-800 mb-1.5">Current score</label>
+              <input id="ambassador-current-score" type="number" inputmode="numeric" min="0" step="1" required autofocus placeholder="e.g. 1200" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+              <p class="mt-2 text-xs text-gray-500">You can update this score again the next time you sign in.</p>
+            </div>
+            <p id="score-entry-error" role="alert" class="min-h-5 text-xs font-medium text-red-600"></p>
+            <button type="submit" class="w-full px-5 py-3 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] active:translate-y-px text-white font-bold text-sm transition-colors">Open dashboard</button>
+          </form>
+        </section>
+      </div>
+    `;
+  }
+
   // Render Views
   function renderApp() {
+    const main = document.getElementById('main-content');
+    if (!AppState.session) {
+      setAuthenticatedShell(false);
+      main.innerHTML = renderLoginView();
+      return;
+    }
+
+    setAuthenticatedShell(true);
     renderSidebar();
     AppState.updateHeader();
-    const main = document.getElementById('main-content');
+
+    if (AppState.role === 'ambassador' && window.GSA_REQUIRE_SCORE) {
+      main.innerHTML = renderAmbassadorScoreSetup();
+      return;
+    }
 
     if (AppState.role === 'participant') {
-      main.innerHTML = renderParticipantHub();
+      main.innerHTML = AppState.selectedAmbassadorId ? renderParticipantHub() : renderAmbassadorSelection();
     } else {
       switch (AppState.currentTab) {
         case 'home':
@@ -285,11 +526,132 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
   }
 
+  // Form Field Copy Helper
+  window.copyFormField = function(fieldKey) {
+    var prompts = window.GSA_DATA.masterPrompts || [];
+    var cur = prompts.find(function(p) { return p.id === AppState.selectedPromptId; }) || prompts[0];
+    if (!cur) return;
+    var fieldMap = {
+      yourBuild: cur.yourBuild,
+      nanoPrompt: cur.nanoPrompt,
+      followUpPrompts: cur.followUpPrompts.join('\n\n'),
+      theIdea: cur.theIdea,
+      theFriction: cur.theFriction,
+      theWin: cur.theWin
+    };
+    var labels = {
+      yourBuild: 'Your Build',
+      nanoPrompt: 'Nano Banana Prompt',
+      followUpPrompts: 'Follow-up Prompts',
+      theIdea: 'The Idea',
+      theFriction: 'The Friction',
+      theWin: 'The Win'
+    };
+    var text = fieldMap[fieldKey] || '';
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Copied ' + (labels[fieldKey] || fieldKey) + ' to clipboard!');
+    }).catch(function() {
+      showToast('Error copying');
+    });
+  };
+
+  // Form Assistant UI Builder (avoids backtick conflicts in template literals)
+  function renderFormAssistant(cur) {
+    var allPrompts = window.GSA_DATA.masterPrompts || [];
+    if (!cur) return '';
+
+    var chips = allPrompts.map(function(p) {
+      var active = p.id === AppState.selectedPromptId;
+      var cls = active
+        ? 'bg-[#346BF1] text-white border-[#346BF1]'
+        : 'bg-gray-50 text-gray-700 border-gray-200 hover:border-[#346BF1] hover:bg-blue-50/30';
+      return '<button onclick="selectMasterPrompt(\'' + p.id + '\')" class="px-4 py-2 rounded-2xl border text-xs font-bold transition-colors ' + cls + '">' + p.title + '<span class="block text-[10px] font-normal opacity-70">' + p.tag + '</span></button>';
+    }).join('');
+
+    var fields = [
+      { key: 'yourBuild', label: 'Your Build (Game Idea Concept)', icon: 'map-pin', preview: cur.yourBuild },
+      { key: 'nanoPrompt', label: 'Your Nano Banana Prompt', icon: 'sparkles', preview: cur.nanoPrompt },
+      { key: 'followUpPrompts', label: 'Key Follow-up Prompts (2-5)', icon: 'list', preview: cur.followUpPrompts.join(' | ') },
+      { key: 'theIdea', label: 'The Idea (Feature Wishlist)', icon: 'lightbulb', preview: cur.theIdea },
+      { key: 'theFriction', label: 'The Friction (Challenge & Workaround)', icon: 'zap', preview: cur.theFriction },
+      { key: 'theWin', label: 'The Win (What came together)', icon: 'trophy', preview: cur.theWin }
+    ];
+
+    var fieldCards = fields.map(function(f, idx) {
+      var shortPreview = f.preview.length > 180 ? f.preview.substring(0, 180) + '...' : f.preview;
+      return '<div class="p-4 rounded-2xl border border-gray-200 bg-gray-50/50 space-y-2">' +
+        '<div class="flex items-center justify-between">' +
+          '<div class="flex items-center gap-2">' +
+            '<span class="w-6 h-6 rounded-full bg-[#346BF1] text-white font-bold text-[10px] flex items-center justify-center shrink-0">' + (idx + 1) + '</span>' +
+            '<span class="font-bold text-sm text-gray-900">' + f.label + '</span>' +
+          '</div>' +
+          '<button onclick="copyFormField(\'' + f.key + '\')" class="px-3 py-1.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-[#346BF1] shadow-xs flex items-center gap-1.5 transition-colors">' +
+            '<i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy' +
+          '</button>' +
+        '</div>' +
+        '<p class="text-xs text-gray-600 leading-relaxed pl-8">' + shortPreview + '</p>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">' +
+      '<div class="flex items-center justify-between pb-2 border-b border-gray-100">' +
+        '<div>' +
+          '<span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">Product Trial Form Assistant</span>' +
+          '<h2 class="text-lg font-bold text-gray-900">Select Your Game Concept</h2>' +
+          '<p class="text-xs text-gray-500">Pick a master prompt below. All 6 form fields will be generated for you to copy-paste into the Google Form.</p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">' + chips + '</div>' +
+      '<div class="pt-2 space-y-3">' +
+        '<div class="flex items-center justify-between">' +
+          '<h3 class="font-bold text-sm text-gray-900">Form Answers: ' + cur.title + '</h3>' +
+          '<button onclick="copyAllFormAnswers()" class="px-4 py-2 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors">' +
+            '<i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i> Copy All 6 Answers' +
+          '</button>' +
+        '</div>' +
+        fieldCards +
+      '</div>' +
+    '</div>';
+  }
+
   // 1. PARTICIPANT HUB (Product Trial Survey Links, Copy Details, Text Prompt & Certificate Generator)
+  function renderAmbassadorSelection() {
+    const ambassadors = window.GSA_DATA.ambassadors || [];
+    return `
+      <div class="max-w-4xl mx-auto pb-16">
+        <div class="bg-gradient-to-r from-[#1A73E8] to-[#346BF1] rounded-3xl p-7 sm:p-10 text-white shadow-sm relative overflow-hidden mb-6">
+          <div class="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
+          <div class="relative z-10">
+            <span class="px-3 py-1 rounded-full bg-white/20 text-xs font-bold uppercase tracking-wider text-blue-100">Student Participant</span>
+            <h1 class="text-3xl sm:text-4xl font-bold tracking-tight mt-3">Which ambassador's contest are you in?</h1>
+            <p class="text-blue-100 text-sm mt-2 max-w-2xl leading-relaxed">Choose your ambassador to continue. Their correct name, GID, and email will be shown in the forms area.</p>
+          </div>
+        </div>
+        <div class="bg-white rounded-3xl p-5 sm:p-7 border border-gray-200 shadow-sm">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            ${ambassadors.map(ambassador => `
+              <button onclick="selectParticipantAmbassador('${ambassador.id}')" class="text-left p-5 rounded-2xl border border-gray-200 hover:border-[#346BF1] hover:bg-blue-50/40 transition-all group">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1]">Ambassador Contest</span>
+                    <h2 class="mt-1 font-bold text-gray-900 text-lg group-hover:text-[#346BF1]">${ambassador.name}</h2>
+                    <p class="mt-1 text-xs text-gray-500">GID: ${ambassador.gid}</p>
+                  </div>
+                  <i data-lucide="arrow-right" class="w-5 h-5 text-gray-400 group-hover:text-[#346BF1] group-hover:translate-x-0.5 transition-all"></i>
+                </div>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function renderParticipantHub() {
-    const amb = AppState.profile;
+    const amb = (window.GSA_DATA.ambassadors || []).find(item => item.id === AppState.selectedAmbassadorId) || AppState.profile;
     const sess = window.GSA_DATA.participantSession;
     const part = AppState.participant;
+    const cur = (window.GSA_DATA.masterPrompts || []).find(p => p.id === AppState.selectedPromptId) || (window.GSA_DATA.masterPrompts||[])[0];
 
     const canIssue = part.preSurveyFilled && part.feedbackFilled && part.name.trim().length > 1;
 
@@ -311,14 +673,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- Section 1: Ambassador & Session Details (1-Click Copy for Google Forms) -->
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-4">
-          <div class="flex items-center justify-between pb-2 border-b border-gray-100">
+          <div class="flex items-start justify-between gap-3 pb-2 border-b border-gray-100">
             <div>
               <h2 class="text-lg font-bold text-gray-900">Ambassador Details for Your Form</h2>
               <p class="text-xs text-gray-500">Click the copy button next to each field to easily paste into the Google Form.</p>
             </div>
+            <button onclick="changeParticipantAmbassador()" class="shrink-0 text-xs font-bold text-[#346BF1] hover:underline">Change</button>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
             <div class="p-3.5 rounded-2xl bg-[#F8FAFF] border border-blue-100 flex items-center justify-between">
               <div>
                 <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Ambassador Name</span>
@@ -341,20 +704,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <div class="p-3.5 rounded-2xl bg-[#F8FAFF] border border-blue-100 flex items-center justify-between">
               <div>
-                <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Workshop Theme</span>
-                <span class="font-bold text-gray-900 text-sm truncate max-w-[220px] block">${sess.workshopTheme}</span>
+                <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Ambassador Email</span>
+                <span class="font-bold text-gray-900 text-sm truncate max-w-[220px] block">${amb.email || ''}</span>
               </div>
-              <button onclick="copyText('${sess.workshopTheme}', 'Workshop Theme')" class="px-3 py-1.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-[#346BF1] shadow-xs flex items-center gap-1.5 transition-colors">
-                <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy
-              </button>
-            </div>
-
-            <div class="p-3.5 rounded-2xl bg-[#F8FAFF] border border-blue-100 flex items-center justify-between">
-              <div>
-                <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Campus / College</span>
-                <span class="font-bold text-gray-900 text-sm">${amb.college}</span>
-              </div>
-              <button onclick="copyText('${amb.college}', 'College')" class="px-3 py-1.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-[#346BF1] shadow-xs flex items-center gap-1.5 transition-colors">
+              <button onclick="copyText('${amb.email || ''}', 'Ambassador Email')" class="px-3 py-1.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-[#346BF1] shadow-xs flex items-center gap-1.5 transition-colors">
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy
               </button>
             </div>
@@ -384,6 +737,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </a>
           </div>
         </div>
+
+        <!-- Section X: Master Prompt Selector & Form Assistant -->
+        ${renderFormAssistant(cur)}
 
         <!-- Section 3: Product Trial Step-by-Step Forms -->
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">
@@ -545,7 +901,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Certificate Generator and Preview Modal
   window.generateAndShowCertificate = function() {
     const part = AppState.participant;
-    const amb = AppState.profile;
+    const cur = (window.GSA_DATA.masterPrompts || []).find(p => p.id === AppState.selectedPromptId) || (window.GSA_DATA.masterPrompts||[])[0];
+    const amb = (window.GSA_DATA.ambassadors || []).find(item => item.id === AppState.selectedAmbassadorId) || AppState.profile;
     const sess = window.GSA_DATA.participantSession;
     const certDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const certId = 'GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -575,7 +932,7 @@ document.addEventListener('DOMContentLoaded', () => {
             Verification ID: ${certId} • Issued on ${certDate}
           </div>
           <div class="flex gap-2 w-full sm:w-auto">
-            <button onclick="downloadCertificateCanvas('${part.name}', '${certId}')" class="flex-1 sm:flex-initial px-6 py-2.5 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-xs shadow-sm transition-colors flex items-center justify-center gap-1.5">
+            <button id="download-certificate" onclick="downloadCertificateCanvas()" disabled class="flex-1 sm:flex-initial px-6 py-2.5 rounded-full bg-[#346BF1] hover:bg-[#2851C6] disabled:cursor-wait disabled:opacity-60 text-white font-bold text-xs shadow-sm transition-colors flex items-center justify-center gap-1.5">
               <i data-lucide="download" class="w-4 h-4"></i> Download Certificate (PNG)
             </button>
             <button onclick="window.print()" class="px-5 py-2.5 rounded-full border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold text-xs transition-colors flex items-center gap-1.5">
@@ -583,151 +940,156 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           </div>
         </div>
+        <p id="certificate-render-status" class="text-center text-xs font-medium text-gray-500">Preparing your certificate artwork...</p>
       </div>
     `;
 
     modal.classList.remove('hidden');
     lucide.createIcons();
+    window.currentCertificateId = certId;
 
-    // Draw Certificate on Canvas
-    setTimeout(() => {
-      drawCertificate(part.name, part.college, amb.name, amb.gid, sess.workshopTheme, certDate, certId);
-    }, 50);
+    // Render the supplied certificate artwork before enabling export. This
+    // prevents a partially drawn certificate from being downloaded.
+    drawCertificate(part.name, certDate, amb.signature, amb.signatureCrop).then(() => {
+      const downloadButton = document.getElementById('download-certificate');
+      if (downloadButton) downloadButton.disabled = false;
+      AppState.participant.certificateIssued = true;
+      AppState.save();
+    }).catch(() => {
+      const status = document.getElementById('certificate-render-status');
+      if (status) status.textContent = 'Certificate artwork could not be loaded. Please try again.';
+    });
   };
 
-  function drawCertificate(studentName, college, ambName, ambGid, theme, dateStr, certId) {
+  function loadCertificateImage(source) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = source;
+    });
+  }
+
+  function fitCertificateText(ctx, text, maxWidth, initialSize) {
+    let size = initialSize;
+    do {
+      ctx.font = `700 ${size}px "Google Sans Certificate", "Outfit", sans-serif`;
+      if (ctx.measureText(text).width <= maxWidth || size <= 48) break;
+      size -= 2;
+    } while (size > 48);
+  }
+
+  function getSignatureCrop(image) {
+    const source = document.createElement('canvas');
+    source.width = image.naturalWidth;
+    source.height = image.naturalHeight;
+    const sourceContext = source.getContext('2d', { willReadFrequently: true });
+    sourceContext.drawImage(image, 0, 0);
+
+    const pixels = sourceContext.getImageData(0, 0, source.width, source.height).data;
+    let left = source.width;
+    let top = source.height;
+    let right = -1;
+    let bottom = -1;
+
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const offset = (y * source.width + x) * 4;
+        const alpha = pixels[offset + 3];
+        const brightness = (pixels[offset] + pixels[offset + 1] + pixels[offset + 2]) / 3;
+        // Transparent PNG margins and the white paper around JPEG scans are
+        // both excluded. Only visible ink is used for placement.
+        if (alpha > 32 && brightness < 175) {
+          left = Math.min(left, x);
+          top = Math.min(top, y);
+          right = Math.max(right, x);
+          bottom = Math.max(bottom, y);
+        }
+      }
+    }
+
+    if (right < left || bottom < top) {
+      return { x: 0, y: 0, width: source.width, height: source.height };
+    }
+
+    const padding = Math.round(Math.max(source.width, source.height) * 0.025);
+    const x = Math.max(0, left - padding);
+    const y = Math.max(0, top - padding);
+    const width = Math.min(source.width - x, right - left + 1 + padding * 2);
+    const height = Math.min(source.height - y, bottom - top + 1 + padding * 2);
+    return { x, y, width, height };
+  }
+
+  function createInkSignature(image, crop) {
+    const clean = document.createElement('canvas');
+    clean.width = crop.width;
+    clean.height = crop.height;
+    const cleanContext = clean.getContext('2d', { willReadFrequently: true });
+    cleanContext.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+
+    const imageData = cleanContext.getImageData(0, 0, clean.width, clean.height);
+    const pixels = imageData.data;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const brightness = (pixels[offset] + pixels[offset + 1] + pixels[offset + 2]) / 3;
+      // Convert pale paper and scanner noise to transparency while retaining
+      // the dark handwritten ink from JPEG and PNG uploads alike.
+      const inkAlpha = Math.max(0, Math.min(255, (190 - brightness) * 3));
+      pixels[offset + 3] = Math.min(pixels[offset + 3], inkAlpha);
+    }
+    cleanContext.putImageData(imageData, 0, 0);
+    return clean;
+  }
+
+  async function drawCertificate(studentName, dateStr, signaturePath, signatureCrop) {
     const canvas = document.getElementById('cert-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const template = await loadCertificateImage(window.GSA_DATA.certificate.template);
+    await document.fonts.ready;
+
+    canvas.width = template.naturalWidth;
+    canvas.height = template.naturalHeight;
     const w = canvas.width;
     const h = canvas.height;
+    ctx.drawImage(template, 0, 0, w, h);
 
-    // Background
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, w, h);
-
-    // Subtle background tint
-    const bgGrad = ctx.createLinearGradient(0, 0, w, h);
-    bgGrad.addColorStop(0, '#FAFCFF');
-    bgGrad.addColorStop(1, '#F0F5FF');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(40, 40, w - 80, h - 80);
-
-    // Outer Border (Google Blue)
-    ctx.strokeStyle = '#346BF1';
-    ctx.lineWidth = 14;
-    ctx.strokeRect(30, 30, w - 60, h - 60);
-
-    // Inner Border
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(48, 48, w - 96, h - 96);
-
-    // Decorative 4-color top corner accent
-    ctx.fillStyle = '#4285F4'; ctx.fillRect(48, 48, 120, 6);
-    ctx.fillStyle = '#EA4335'; ctx.fillRect(168, 48, 120, 6);
-    ctx.fillStyle = '#FBBC04'; ctx.fillRect(288, 48, 120, 6);
-    ctx.fillStyle = '#34A853'; ctx.fillRect(408, 48, 120, 6);
-
-    // Header Title
-    ctx.fillStyle = '#346BF1';
-    ctx.font = 'bold 26px Inter, sans-serif';
+    // The supplied certificate intentionally leaves this rule blank for the
+    // participant's name. Measurements are proportional to the template so
+    // the artwork remains print quality at its native 6142 x 4429 pixels.
+    const name = (studentName || 'Student Participant').trim();
     ctx.textAlign = 'center';
-    ctx.fillText('GOOGLE GEMINI STUDENT AMBASSADOR PROGRAM', w / 2, 130);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#202124';
+    fitCertificateText(ctx, name, w * 0.62, Math.round(w * 0.026));
+    ctx.fillText(name, w / 2, h * 0.493);
 
-    // Main Certificate Header
-    ctx.fillStyle = '#111827';
-    ctx.font = 'bold 54px Cinzel, serif, Outfit';
-    ctx.fillText('CERTIFICATE OF PARTICIPATION', w / 2, 210);
+    // The date belongs above the supplied date rule in the lower-left field.
+    ctx.font = `700 ${Math.round(w * 0.008)}px "Google Sans Certificate", "Outfit", sans-serif`;
+    ctx.fillText(dateStr, w * 0.185, h * 0.835);
 
-    // Divider line
-    ctx.strokeStyle = '#346BF1';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(w / 2 - 160, 240);
-    ctx.lineTo(w / 2 + 160, 240);
-    ctx.stroke();
-
-    // Body Text
-    ctx.fillStyle = '#6B7280';
-    ctx.font = '500 24px Inter, sans-serif';
-    ctx.fillText('THIS CERTIFICATE IS PROUDLY PRESENTED TO', w / 2, 310);
-
-    // Student Name
-    ctx.fillStyle = '#1E3A8A';
-    ctx.font = 'bold 64px Outfit, sans-serif';
-    ctx.fillText(studentName || 'Student Participant', w / 2, 400);
-
-    if (college) {
-      ctx.fillStyle = '#4B5563';
-      ctx.font = '500 22px Inter, sans-serif';
-      ctx.fillText(`from ${college}`, w / 2, 445);
+    if (signaturePath) {
+      const signature = await loadCertificateImage(signaturePath);
+      const crop = signatureCrop || getSignatureCrop(signature);
+      const maxWidth = w * 0.165;
+      const maxHeight = h * 0.09;
+      const scale = Math.min(maxWidth / crop.width, maxHeight / crop.height);
+      const signatureWidth = crop.width * scale;
+      const signatureHeight = crop.height * scale;
+      const signatureX = w * 0.814 - signatureWidth / 2;
+      const signatureY = h * 0.84 - signatureHeight;
+      const inkSignature = createInkSignature(signature, crop);
+      ctx.drawImage(inkSignature, signatureX, signatureY, signatureWidth, signatureHeight);
     }
 
-    // Reason Text
-    ctx.fillStyle = '#4B5563';
-    ctx.font = '400 22px Inter, sans-serif';
-    ctx.fillText('for successfully completing the hands-on Google Gemini Product Trial workshop:', w / 2, 530);
-
-    // Workshop Theme
-    ctx.fillStyle = '#111827';
-    ctx.font = 'bold 30px Outfit, sans-serif';
-    ctx.fillText(theme, w / 2, 580);
-
-    ctx.fillStyle = '#6B7280';
-    ctx.font = '400 20px Inter, sans-serif';
-    ctx.fillText('Exploring generative AI capabilities, multimodal prompting, and creative campus innovation.', w / 2, 625);
-
-    // Signatures / Endorsements
-    const sigY = 790;
-
-    // Ambassador Signature Line
-    ctx.strokeStyle = '#94A3B8';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(220, sigY);
-    ctx.lineTo(520, sigY);
-    ctx.stroke();
-
-    ctx.fillStyle = '#111827';
-    ctx.font = 'bold 22px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(ambName, 370, sigY + 35);
-    ctx.fillStyle = '#6B7280';
-    ctx.font = '500 16px Inter, sans-serif';
-    ctx.fillText(`Google Student Ambassador (GID: ${ambGid})`, 370, sigY + 60);
-
-    // Date & Verification
-    ctx.strokeStyle = '#94A3B8';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(w - 520, sigY);
-    ctx.lineTo(w - 220, sigY);
-    ctx.stroke();
-
-    ctx.fillStyle = '#111827';
-    ctx.font = 'bold 22px Inter, sans-serif';
-    ctx.fillText(dateStr, w - 370, sigY + 35);
-    ctx.fillStyle = '#6B7280';
-    ctx.font = '500 16px Inter, sans-serif';
-    ctx.fillText(`Verified Certificate ID: ${certId}`, w - 370, sigY + 60);
-
-    // Sparkle Logo in bottom center
-    const sparkleImg = new Image();
-    sparkleImg.src = 'assets/gemini-sparkle.png';
-    sparkleImg.onload = () => {
-      ctx.drawImage(sparkleImg, w / 2 - 36, 835, 72, 72);
-    };
-
-    ctx.fillStyle = '#346BF1';
-    ctx.font = 'bold 18px Inter, sans-serif';
-    ctx.fillText('SHAPING THE FUTURE OF AI', w / 2, 925);
+    const status = document.getElementById('certificate-render-status');
+    if (status) status.textContent = 'Certificate is ready to download.';
   }
 
-  window.downloadCertificateCanvas = function(name, certId) {
+  window.downloadCertificateCanvas = function() {
     const canvas = document.getElementById('cert-canvas');
     if (!canvas) return;
-    const safeName = (name || 'Participant').replace(/[^a-zA-Z0-9]/g, '_');
+    const safeName = (AppState.participant.name || 'Participant').replace(/[^a-zA-Z0-9]/g, '_');
+    const certId = window.currentCertificateId || 'GSA-PT-CERTIFICATE';
     const link = document.createElement('a');
     link.download = `GSA_Certificate_${safeName}_${certId}.png`;
     link.href = canvas.toDataURL('image/png');
