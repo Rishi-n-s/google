@@ -678,9 +678,15 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText(`Verified Certificate ID: ${certId}`, w - 370, sigY + 60);
 
     // Sparkle Logo in bottom center
+    const sparkleImg = new Image();
+    sparkleImg.src = 'assets/gemini-sparkle.png';
+    sparkleImg.onload = () => {
+      ctx.drawImage(sparkleImg, w / 2 - 36, 835, 72, 72);
+    };
+
     ctx.fillStyle = '#346BF1';
     ctx.font = 'bold 18px Inter, sans-serif';
-    ctx.fillText('SHAPING THE FUTURE OF AI', w / 2, 910);
+    ctx.fillText('SHAPING THE FUTURE OF AI', w / 2, 925);
   }
 
   window.downloadCertificateCanvas = function(name, certId) {
