@@ -938,14 +938,17 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   };
 
+  window.confirmAllSurveys = function() {
+    AppState.participant.preSurveyFilled = true;
+    AppState.participant.feedbackFilled = true;
+    AppState.save();
+    renderApp();
+    showToast('Product Trial surveys marked as completed!');
+  };
+
   window.updateParticipantField = function(field, val) {
     AppState.participant[field] = val;
     AppState.save();
-    const canIssue = AppState.participant.preSurveyFilled && AppState.participant.feedbackFilled && AppState.participant.name.trim().length > 1 && (AppState.participant.email || '').includes('@');
-    const reqBtn = document.querySelector('#main-content button[onclick*="requestCertificate"]');
-    if ((canIssue && !reqBtn) || (!canIssue && reqBtn)) {
-      renderApp();
-    }
   };
 
   function getCertRequestStatusRaw(requestId) {
@@ -960,28 +963,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const raw = getCertRequestStatusRaw(requestId);
     if (raw === 'approved') return 'Approved & Verified';
     if (raw === 'rejected') return 'Declined';
-    if (raw === 'pending') return 'Pending Ambassador Approval';
+    if (raw === 'pending') return 'Live Approval Pending';
     return 'Not Requested';
   }
   window.getCertRequestStatus = getCertRequestStatus;
 
-  window.requestCertificate = function() {
+  window.requestCertificate = async function() {
     const part = AppState.participant;
-    const ambId = AppState.selectedAmbassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
-    const amb = (window.GSA_DATA.ambassadors || []).find(a => a.id === ambId) || window.GSA_DATA.defaultProfile;
+    const nameInput = document.getElementById('part-name');
+    const emailInput = document.getElementById('part-email');
+    const collegeInput = document.getElementById('part-college');
+
+    if (nameInput && nameInput.value.trim()) part.name = nameInput.value.trim();
+    if (emailInput && emailInput.value.trim()) part.email = emailInput.value.trim();
+    if (collegeInput && collegeInput.value.trim()) part.college = collegeInput.value.trim();
 
     if (!part.name || part.name.trim().length < 2) {
       showToast('Please enter your full name');
+      if (nameInput) nameInput.focus();
       return;
     }
     if (!part.email || !part.email.includes('@')) {
       showToast('Please enter a valid email address');
+      if (emailInput) emailInput.focus();
       return;
     }
-    if (!part.preSurveyFilled || !part.feedbackFilled) {
-      showToast('Please complete both Product Trial surveys first');
-      return;
-    }
+
+    // Auto-confirm survey completion upon requesting
+    part.preSurveyFilled = true;
+    part.feedbackFilled = true;
+
+    const ambId = AppState.selectedAmbassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
+    const amb = (window.GSA_DATA.ambassadors || []).find(a => a.id === ambId) || window.GSA_DATA.defaultProfile;
 
     const reqId = 'GSA-REQ-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
     const verificationId = 'GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -1002,13 +1015,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!Array.isArray(AppState.certRequests)) {
       AppState.certRequests = [];
     }
-    AppState.certRequests.unshift(newReq);
+    const existIdx = AppState.certRequests.findIndex(r => r.participantEmail === newReq.participantEmail);
+    if (existIdx >= 0) {
+      AppState.certRequests[existIdx] = newReq;
+    } else {
+      AppState.certRequests.unshift(newReq);
+    }
 
     AppState.participant.certificateRequested = true;
     AppState.participant.certificateRequestId = reqId;
     AppState.save();
     renderApp();
-    showToast(`Certificate request submitted to ${amb.name}!`);
+
+    // Broadcast to real-time server
+    try {
+      await fetch('/api/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newReq)
+      });
+    } catch (err) {
+      console.warn('Real-time sync notice:', err);
+    }
+
+    showToast(`Certificate request sent to ${amb.name} in real time!`);
   };
 
   window.resetCertRequest = function() {
@@ -1019,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('You can now submit a new certificate request.');
   };
 
-  window.approveCertRequest = function(requestId) {
+  window.approveCertRequest = async function(requestId) {
     const req = (AppState.certRequests || []).find(r => r.id === requestId);
     if (!req) return;
 
@@ -1035,16 +1065,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     AppState.save();
     renderApp();
+
+    // Real-time server push
+    try {
+      await fetch('/api/requests/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: requestId })
+      });
+    } catch (err) {
+      console.warn('Approve sync notice:', err);
+    }
+
     openEmailDispatchModal(req);
   };
 
-  window.rejectCertRequest = function(requestId) {
+  window.rejectCertRequest = async function(requestId) {
     if (!confirm('Are you sure you want to decline this certificate request?')) return;
     const req = (AppState.certRequests || []).find(r => r.id === requestId);
     if (!req) return;
 
     req.status = 'rejected';
     req.decidedAt = new Date().toISOString();
+    AppState.save();
+    renderApp();
+
+    try {
+      await fetch('/api/requests/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: requestId })
+      });
+    } catch (err) {}
+
+    showToast(`Request from ${req.participantName} was declined.`);
+  };
     AppState.save();
     renderApp();
     showToast(`Request from ${req.participantName} was declined.`);
