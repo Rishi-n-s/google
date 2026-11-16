@@ -366,7 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (AppState.role === 'ambassador') {
       // Ambassador navigation
-      const pendingCount = AppState.certRequests.filter(r => r.status === 'pending' && r.ambassadorId === (AppState.session ? AppState.session.ambassadorId : '')).length;
+      const currentAmbId = AppState.session && AppState.session.ambassadorId ? AppState.session.ambassadorId : 'rishi';
+      const pendingCount = (AppState.certRequests || []).filter(r => r.status === 'pending' && (r.ambassadorId === currentAmbId || (!r.ambassadorId && currentAmbId === 'rishi'))).length;
       const items = [
         { id: 'home', label: 'Home' },
         { id: 'about', label: 'About' },
@@ -933,24 +934,273 @@ document.addEventListener('DOMContentLoaded', () => {
   window.updateParticipantField = function(field, val) {
     AppState.participant[field] = val;
     AppState.save();
-    // Update button status live
-    const canIssue = AppState.participant.preSurveyFilled && AppState.participant.feedbackFilled && AppState.participant.name.trim().length > 1;
-    const btnContainer = document.querySelector('#main-content button[onclick*="generateAndShowCertificate"]');
-    if (!canIssue && btnContainer) {
-      renderApp();
-    } else if (canIssue && !btnContainer) {
+    const canIssue = AppState.participant.preSurveyFilled && AppState.participant.feedbackFilled && AppState.participant.name.trim().length > 1 && (AppState.participant.email || '').includes('@');
+    const reqBtn = document.querySelector('#main-content button[onclick*="requestCertificate"]');
+    if ((canIssue && !reqBtn) || (!canIssue && reqBtn)) {
       renderApp();
     }
   };
 
-  // Certificate Generator and Preview Modal
-  window.generateAndShowCertificate = function() {
+  function getCertRequestStatusRaw(requestId) {
+    if (!requestId) return 'none';
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return 'none';
+    return req.status; // 'pending' | 'approved' | 'rejected'
+  }
+  window.getCertRequestStatusRaw = getCertRequestStatusRaw;
+
+  function getCertRequestStatus(requestId) {
+    const raw = getCertRequestStatusRaw(requestId);
+    if (raw === 'approved') return 'Approved & Verified';
+    if (raw === 'rejected') return 'Declined';
+    if (raw === 'pending') return 'Pending Ambassador Approval';
+    return 'Not Requested';
+  }
+  window.getCertRequestStatus = getCertRequestStatus;
+
+  window.requestCertificate = function() {
     const part = AppState.participant;
-    const cur = (window.GSA_DATA.masterPrompts || []).find(p => p.id === AppState.selectedPromptId) || (window.GSA_DATA.masterPrompts||[])[0];
-    const amb = (window.GSA_DATA.ambassadors || []).find(item => item.id === AppState.selectedAmbassadorId) || AppState.profile;
+    const ambId = AppState.selectedAmbassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
+    const amb = (window.GSA_DATA.ambassadors || []).find(a => a.id === ambId) || window.GSA_DATA.defaultProfile;
+
+    if (!part.name || part.name.trim().length < 2) {
+      showToast('Please enter your full name');
+      return;
+    }
+    if (!part.email || !part.email.includes('@')) {
+      showToast('Please enter a valid email address');
+      return;
+    }
+    if (!part.preSurveyFilled || !part.feedbackFilled) {
+      showToast('Please complete both Product Trial surveys first');
+      return;
+    }
+
+    const reqId = 'GSA-REQ-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const verificationId = 'GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    const newReq = {
+      id: reqId,
+      participantName: part.name.trim(),
+      participantEmail: part.email.trim(),
+      participantCollege: part.college.trim() || 'Student',
+      ambassadorId: ambId,
+      ambassadorName: amb.name,
+      promptId: AppState.selectedPromptId || 'ember-run',
+      status: 'pending',
+      requestedAt: new Date().toISOString(),
+      decidedAt: null,
+      verificationId: verificationId
+    };
+
+    if (!Array.isArray(AppState.certRequests)) {
+      AppState.certRequests = [];
+    }
+    AppState.certRequests.unshift(newReq);
+
+    AppState.participant.certificateRequested = true;
+    AppState.participant.certificateRequestId = reqId;
+    AppState.save();
+    renderApp();
+    showToast(`Certificate request submitted to ${amb.name}!`);
+  };
+
+  window.resetCertRequest = function() {
+    AppState.participant.certificateRequested = false;
+    AppState.participant.certificateRequestId = '';
+    AppState.save();
+    renderApp();
+    showToast('You can now submit a new certificate request.');
+  };
+
+  window.approveCertRequest = function(requestId) {
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+
+    req.status = 'approved';
+    req.decidedAt = new Date().toISOString();
+    if (!req.verificationId) {
+      req.verificationId = 'GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    }
+
+    if (AppState.participant.certificateRequestId === requestId || AppState.participant.email === req.participantEmail) {
+      AppState.participant.certificateIssued = true;
+    }
+
+    AppState.save();
+    renderApp();
+    openEmailDispatchModal(req);
+  };
+
+  window.rejectCertRequest = function(requestId) {
+    if (!confirm('Are you sure you want to decline this certificate request?')) return;
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+
+    req.status = 'rejected';
+    req.decidedAt = new Date().toISOString();
+    AppState.save();
+    renderApp();
+    showToast(`Request from ${req.participantName} was declined.`);
+  };
+
+  window.reopenCertRequest = function(requestId) {
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+
+    req.status = 'pending';
+    req.decidedAt = null;
+    AppState.save();
+    renderApp();
+    showToast(`Request from ${req.participantName} reopened.`);
+  };
+
+  window.previewCertForRequest = function(requestId) {
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+    generateAndShowCertificate(req);
+  };
+
+  window.openEmailDispatchModal = function(req) {
+    const ambId = req.ambassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
+    const amb = (window.GSA_DATA.ambassadors || []).find(a => a.id === ambId) || window.GSA_DATA.defaultProfile;
+    const modal = document.getElementById('portal-modal');
+
+    const subject = `Google Gemini Student Ambassador - Certificate of Participation Verified (${req.verificationId})`;
+    const emailBody = `Dear ${req.participantName},
+
+Congratulations! Your completion of the Google Gemini Campus Product Trial has been verified and approved.
+
+Certificate Details:
+• Recipient: ${req.participantName}
+• College / University: ${req.participantCollege}
+• Verification ID: ${req.verificationId}
+• Host Ambassador: ${amb.name} (GID: ${amb.gid})
+• Month Theme: Game On Night : Imagine The Impossible
+
+You can now log in to the Google Gemini Student Ambassador Portal to download your official certificate.
+
+Best regards,
+${amb.name}
+Google Student Ambassador
+${amb.email || ''}`;
+
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedBody = encodeURIComponent(emailBody);
+    const mailtoUrl = `mailto:${encodeURIComponent(req.participantEmail)}?subject=${encodedSubject}&body=${encodedBody}`;
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(req.participantEmail)}&su=${encodedSubject}&body=${encodedBody}`;
+
+    modal.innerHTML = `
+      <div class="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-gray-200 space-y-6 max-h-[95vh] overflow-y-auto animate-modal">
+        <div class="flex items-center justify-between pb-3 border-b border-gray-100">
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+              <i data-lucide="check-circle" class="w-6 h-6"></i>
+            </span>
+            <div>
+              <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">Certificate Approved</span>
+              <h3 class="text-lg font-bold text-gray-900">Send to ${req.participantName}'s Email</h3>
+            </div>
+          </div>
+          <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
+            <i data-lucide="x" class="w-6 h-6"></i>
+          </button>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 space-y-2 text-xs">
+          <div class="flex items-center justify-between font-semibold text-emerald-900">
+            <span>Recipient Email:</span>
+            <span class="font-mono text-emerald-800">${req.participantEmail}</span>
+          </div>
+          <div class="flex items-center justify-between font-semibold text-emerald-900">
+            <span>Verification ID:</span>
+            <span class="font-mono text-emerald-800">${req.verificationId}</span>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Email Draft Content:</label>
+          <div class="p-4 rounded-2xl bg-gray-50 border border-gray-200 text-xs font-mono text-gray-800 whitespace-pre-wrap max-h-48 overflow-y-auto select-all leading-relaxed">
+${emailBody}
+          </div>
+        </div>
+
+        <div class="space-y-3 pt-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <a href="${mailtoUrl}" class="px-4 py-2.5 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] text-white text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+              <i data-lucide="mail" class="w-4 h-4"></i> Open in Default Mail
+            </a>
+            <a href="${gmailUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2.5 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+              <i data-lucide="external-link" class="w-4 h-4"></i> Open in Gmail Web
+            </a>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
+            <button onclick="copyEmailDraft('${req.id}')" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold flex items-center gap-1.5 transition-colors">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Email Text
+            </button>
+            <button onclick="previewCertForRequest('${req.id}')" class="px-4 py-2 rounded-xl border border-gray-200 hover:border-gray-300 text-gray-700 text-xs font-semibold flex items-center gap-1.5 transition-colors">
+              <i data-lucide="award" class="w-3.5 h-3.5"></i> View Certificate Artwork
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    modal.classList.remove('hidden');
+    lucide.createIcons();
+  };
+
+  window.openEmailDispatchModalById = function(requestId) {
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+    openEmailDispatchModal(req);
+  };
+
+  window.copyEmailDraft = function(requestId) {
+    const req = (AppState.certRequests || []).find(r => r.id === requestId);
+    if (!req) return;
+    const ambId = req.ambassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
+    const amb = (window.GSA_DATA.ambassadors || []).find(a => a.id === ambId) || window.GSA_DATA.defaultProfile;
+
+    const emailBody = `Dear ${req.participantName},
+
+Congratulations! Your completion of the Google Gemini Campus Product Trial has been verified and approved.
+
+Certificate Details:
+• Recipient: ${req.participantName}
+• College / University: ${req.participantCollege}
+• Verification ID: ${req.verificationId}
+• Host Ambassador: ${amb.name} (GID: ${amb.gid})
+• Month Theme: Game On Night : Imagine The Impossible
+
+You can now log in to the Google Gemini Student Ambassador Portal to download your official certificate.
+
+Best regards,
+${amb.name}
+Google Student Ambassador
+${amb.email || ''}`;
+
+    navigator.clipboard.writeText(emailBody).then(() => {
+      showToast('Copied email draft to clipboard!');
+    }).catch(() => {
+      showToast('Copied to clipboard');
+    });
+  };
+
+  // Certificate Generator and Preview Modal
+  window.generateAndShowCertificate = function(customData) {
+    const reqData = customData || {};
+    const part = {
+      name: reqData.participantName || AppState.participant.name,
+      college: reqData.participantCollege || AppState.participant.college,
+      email: reqData.participantEmail || AppState.participant.email
+    };
+    const cur = (window.GSA_DATA.masterPrompts || []).find(p => p.id === (reqData.promptId || AppState.selectedPromptId)) || (window.GSA_DATA.masterPrompts||[])[0];
+    const ambId = reqData.ambassadorId || AppState.selectedAmbassadorId || (AppState.session && AppState.session.ambassadorId) || 'rishi';
+    const amb = (window.GSA_DATA.ambassadors || []).find(item => item.id === ambId) || AppState.profile;
     const sess = window.GSA_DATA.participantSession;
-    const certDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    const certId = 'GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    const certDate = reqData.decidedAt ? new Date(reqData.decidedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const certId = reqData.verificationId || ('GSA-PT-' + Math.random().toString(36).substring(2, 8).toUpperCase());
 
     const modal = document.getElementById('portal-modal');
 
@@ -959,7 +1209,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="flex items-center justify-between pb-3 border-b border-gray-100">
           <div>
             <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wider block">Verified Product Trial Completion</span>
-            <h3 class="text-xl font-bold text-gray-900">Your Certificate of Participation</h3>
+            <h3 class="text-xl font-bold text-gray-900">Certificate of Participation - ${part.name}</h3>
           </div>
           <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
             <i data-lucide="x" class="w-6 h-6"></i>
@@ -985,21 +1235,23 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           </div>
         </div>
-        <p id="certificate-render-status" class="text-center text-xs font-medium text-gray-500">Preparing your certificate artwork...</p>
+        <p id="certificate-render-status" class="text-center text-xs font-medium text-gray-500">Preparing certificate artwork...</p>
       </div>
     `;
 
     modal.classList.remove('hidden');
     lucide.createIcons();
     window.currentCertificateId = certId;
+    window.currentCertificateName = part.name;
 
-    // Render the supplied certificate artwork before enabling export. This
-    // prevents a partially drawn certificate from being downloaded.
+    // Render the supplied certificate artwork before enabling export.
     drawCertificate(part.name, certDate, amb.signature, amb.signatureCrop).then(() => {
       const downloadButton = document.getElementById('download-certificate');
       if (downloadButton) downloadButton.disabled = false;
-      AppState.participant.certificateIssued = true;
-      AppState.save();
+      if (!customData || customData.participantEmail === AppState.participant.email) {
+        AppState.participant.certificateIssued = true;
+        AppState.save();
+      }
     }).catch(() => {
       const status = document.getElementById('certificate-render-status');
       if (status) status.textContent = 'Certificate artwork could not be loaded. Please try again.';
@@ -1133,7 +1385,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.downloadCertificateCanvas = function() {
     const canvas = document.getElementById('cert-canvas');
     if (!canvas) return;
-    const safeName = (AppState.participant.name || 'Participant').replace(/[^a-zA-Z0-9]/g, '_');
+    const safeName = (window.currentCertificateName || AppState.participant.name || 'Participant').replace(/[^a-zA-Z0-9]/g, '_');
     const certId = window.currentCertificateId || 'GSA-PT-CERTIFICATE';
     const link = document.createElement('a');
     link.download = `GSA_Certificate_${safeName}_${certId}.png`;
@@ -1152,6 +1404,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const p = AppState.profile;
     const tier = AppState.currentTier;
     const tasks = AppState.tasks;
+
+    const currentAmbId = AppState.session && AppState.session.ambassadorId ? AppState.session.ambassadorId : 'rishi';
+    const pendingRequests = (AppState.certRequests || []).filter(r => r.status === 'pending' && (r.ambassadorId === currentAmbId || (!r.ambassadorId && currentAmbId === 'rishi')));
 
     const googleGradient = "font-bold bg-[linear-gradient(90deg,#4285F4,#EA4335,#FBBC04,#34A853)] bg-clip-text text-transparent";
 
@@ -1190,6 +1445,28 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
         </div>
+
+        ${pendingRequests.length > 0 ? `
+          <!-- Pending Certificate Requests Alert -->
+          <div class="p-4 sm:p-5 rounded-3xl bg-amber-50/90 border border-amber-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span class="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <i data-lucide="clock" class="w-5 h-5"></i>
+              </span>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="font-bold text-sm text-amber-900">${pendingRequests.length} Certificate Issue Request${pendingRequests.length > 1 ? 's' : ''} Pending</h3>
+                  <span class="px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">Action Required</span>
+                </div>
+                <p class="text-xs text-amber-700 mt-0.5">Participants in your campus contest have submitted Product Trial forms and are awaiting your verification.</p>
+              </div>
+            </div>
+            <button onclick="switchTab('requests')" class="px-5 py-2.5 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors shrink-0">
+              <span>Review & Approve</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        ` : ''}
 
         <!-- 2x2 Tasks Grid matching screenshot -->
         <div class="grid grid-cols-1 md:grid-cols-2 rounded-3xl border border-gray-200 overflow-hidden bg-white shadow-sm">
@@ -1466,6 +1743,171 @@ document.addEventListener('DOMContentLoaded', () => {
     closeModal();
     renderApp();
   };
+
+  // 2.5 CERTIFICATE REQUESTS VIEW (Ambassador Review & Email Approval)
+  function renderCertRequestsView() {
+    const currentAmbId = AppState.session && AppState.session.ambassadorId ? AppState.session.ambassadorId : 'rishi';
+    const currentAmb = (window.GSA_DATA.ambassadors || []).find(a => a.id === currentAmbId) || window.GSA_DATA.defaultProfile;
+
+    const allRequests = AppState.certRequests || [];
+    const myRequests = allRequests.filter(r => r.ambassadorId === currentAmbId || (!r.ambassadorId && currentAmbId === 'rishi'));
+
+    const pending = myRequests.filter(r => r.status === 'pending');
+    const approved = myRequests.filter(r => r.status === 'approved');
+    const rejected = myRequests.filter(r => r.status === 'rejected');
+
+    return `
+      <div class="max-w-4xl mx-auto space-y-6 pb-16">
+        <!-- Header Banner -->
+        <div class="bg-gradient-to-r from-[#1A73E8] to-[#346BF1] rounded-3xl p-8 text-white shadow-sm relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
+          <div class="relative z-10 space-y-2">
+            <span class="px-3 py-1 rounded-full bg-white/20 text-xs font-bold uppercase tracking-wider text-blue-100">
+              Ambassador Dashboard
+            </span>
+            <h1 class="text-3xl sm:text-4xl font-bold tracking-tight">Certificate Issue Requests</h1>
+            <p class="text-blue-100 text-sm max-w-2xl leading-relaxed">
+              When students in your contest complete their Product Trial surveys, their certificate requests arrive here. Review, approve, and send verification to their email.
+            </p>
+          </div>
+        </div>
+
+        <!-- Metric Counter Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="p-5 rounded-2xl bg-white border border-gray-200 shadow-xs flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-semibold text-amber-600 uppercase tracking-wider block">Pending Review</span>
+              <span class="text-2xl font-bold text-gray-900">${pending.length}</span>
+            </div>
+            <span class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+              <i data-lucide="clock" class="w-5 h-5"></i>
+            </span>
+          </div>
+
+          <div class="p-5 rounded-2xl bg-white border border-gray-200 shadow-xs flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider block">Approved & Issued</span>
+              <span class="text-2xl font-bold text-gray-900">${approved.length}</span>
+            </div>
+            <span class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <i data-lucide="check-circle" class="w-5 h-5"></i>
+            </span>
+          </div>
+
+          <div class="p-5 rounded-2xl bg-white border border-gray-200 shadow-xs flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-semibold text-[#346BF1] uppercase tracking-wider block">Total Contest Requests</span>
+              <span class="text-2xl font-bold text-gray-900">${myRequests.length}</span>
+            </div>
+            <span class="w-10 h-10 rounded-xl bg-blue-50 text-[#346BF1] flex items-center justify-center">
+              <i data-lucide="inbox" class="w-5 h-5"></i>
+            </span>
+          </div>
+        </div>
+
+        <!-- Requests List -->
+        <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-6">
+          <div class="flex items-center justify-between pb-3 border-b border-gray-100">
+            <div>
+              <h2 class="text-lg font-bold text-gray-900">Participant Requests (${myRequests.length})</h2>
+              <p class="text-xs text-gray-500">Host Ambassador: <strong class="text-gray-700">${currentAmb.name}</strong> (GID: ${currentAmb.gid})</p>
+            </div>
+          </div>
+
+          ${myRequests.length === 0 ? `
+            <div class="py-12 text-center space-y-3">
+              <div class="w-12 h-12 rounded-2xl bg-gray-100 text-gray-400 mx-auto flex items-center justify-center">
+                <i data-lucide="inbox" class="w-6 h-6"></i>
+              </div>
+              <h3 class="text-sm font-bold text-gray-800">No Certificate Requests Yet</h3>
+              <p class="text-xs text-gray-500 max-w-sm mx-auto">
+                When students complete your Product Trial and click "Request Certificate from Ambassador", their requests will appear here for your review and approval.
+              </p>
+            </div>
+          ` : `
+            <div class="space-y-4">
+              ${myRequests.map(req => {
+                const prompt = (window.GSA_DATA.masterPrompts || []).find(p => p.id === req.promptId);
+                const reqDate = req.requestedAt ? new Date(req.requestedAt).toLocaleString() : 'Recent';
+                const isApproved = req.status === 'approved';
+                const isRejected = req.status === 'rejected';
+                const isPending = !isApproved && !isRejected;
+
+                return `
+                  <div class="p-5 rounded-2xl border ${isApproved ? 'border-emerald-200 bg-emerald-50/20' : isRejected ? 'border-red-200 bg-red-50/20' : 'border-blue-100 bg-blue-50/20'} space-y-4 transition-all">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <h3 class="font-bold text-base text-gray-900">${req.participantName}</h3>
+                          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            isApproved ? 'bg-emerald-100 text-emerald-800' : isRejected ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                          }">
+                            ${isApproved ? 'Approved' : isRejected ? 'Declined' : 'Pending Review'}
+                          </span>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-0.5">${req.participantCollege || 'Student'}</p>
+                      </div>
+
+                      <div class="text-left sm:text-right text-xs text-gray-500 font-mono">
+                        <div>Requested: ${reqDate}</div>
+                        ${req.verificationId ? `<div class="text-[#346BF1] font-bold">${req.verificationId}</div>` : ''}
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1 border-t border-gray-100">
+                      <div class="p-2.5 rounded-xl bg-white border border-gray-200 flex items-center justify-between">
+                        <div>
+                          <span class="text-[10px] text-gray-400 uppercase font-semibold block">Participant Email</span>
+                          <span class="font-mono text-gray-800 font-medium">${req.participantEmail}</span>
+                        </div>
+                        <button onclick="copyText('${req.participantEmail}', 'Email')" class="px-2 py-1 rounded bg-gray-50 hover:bg-gray-100 text-[10px] font-bold text-[#346BF1] border border-gray-200">
+                          Copy
+                        </button>
+                      </div>
+
+                      <div class="p-2.5 rounded-xl bg-white border border-gray-200 flex items-center justify-between">
+                        <div>
+                          <span class="text-[10px] text-gray-400 uppercase font-semibold block">Game Concept Tested</span>
+                          <span class="font-medium text-gray-800 truncate max-w-[200px] block">${prompt ? prompt.title : 'Custom Trial'}</span>
+                        </div>
+                        <span class="px-2 py-0.5 rounded bg-blue-50 text-[#346BF1] font-bold text-[10px]">${prompt ? prompt.tag : 'Trial'}</span>
+                      </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex flex-wrap items-center gap-2 pt-2">
+                      ${isPending ? `
+                        <button onclick="approveCertRequest('${req.id}')" class="px-5 py-2.5 rounded-xl bg-[#346BF1] hover:bg-[#2851C6] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors">
+                          <i data-lucide="check" class="w-3.5 h-3.5"></i> Approve & Send to Mail
+                        </button>
+                        <button onclick="previewCertForRequest('${req.id}')" class="px-4 py-2.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-gray-700 shadow-2xs flex items-center gap-1.5 transition-colors">
+                          <i data-lucide="eye" class="w-3.5 h-3.5"></i> Preview Certificate
+                        </button>
+                        <button onclick="rejectCertRequest('${req.id}')" class="px-4 py-2.5 rounded-xl bg-white border border-rose-200 hover:bg-rose-50 text-xs font-bold text-rose-600 transition-colors">
+                          Decline
+                        </button>
+                      ` : isApproved ? `
+                        <button onclick="openEmailDispatchModalById('${req.id}')" class="px-5 py-2.5 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors">
+                          <i data-lucide="mail" class="w-3.5 h-3.5"></i> Resend Email / Open Draft
+                        </button>
+                        <button onclick="previewCertForRequest('${req.id}')" class="px-4 py-2.5 rounded-xl bg-white border border-gray-200 hover:border-[#346BF1] text-xs font-bold text-gray-700 shadow-2xs flex items-center gap-1.5 transition-colors">
+                          <i data-lucide="award" class="w-3.5 h-3.5"></i> View Issued Certificate
+                        </button>
+                      ` : `
+                        <button onclick="reopenCertRequest('${req.id}')" class="px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-xs font-bold text-gray-700 transition-colors">
+                          Reopen Request
+                        </button>
+                      `}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
 
   // 3. ABOUT VIEW
   function renderAboutView() {
