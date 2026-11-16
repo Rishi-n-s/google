@@ -764,10 +764,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- Section 3: Product Trial Step-by-Step Forms -->
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">
-          <div>
-            <span class="text-[10px] font-bold uppercase tracking-wider text-red-600 block">Required for Certificate</span>
-            <h2 class="text-lg font-bold text-gray-900">Complete Product Trial Surveys</h2>
-            <p class="text-xs text-gray-500">Note: Survey completion applies strictly to Product Trial (not Product Understanding).</p>
+          <div class="flex items-center justify-between pb-1">
+            <div>
+              <span class="text-[10px] font-bold uppercase tracking-wider text-red-600 block">Required for Certificate</span>
+              <h2 class="text-lg font-bold text-gray-900">Complete Product Trial Surveys</h2>
+              <p class="text-xs text-gray-500">Note: Survey completion applies strictly to Product Trial (not Product Understanding).</p>
+            </div>
+            <button onclick="confirmAllSurveys()" class="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#346BF1] text-xs font-bold transition-colors shrink-0">
+              Mark Both Completed
+            </button>
           </div>
 
           <!-- Step 1: Pre-Survey Form -->
@@ -780,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   <p class="text-xs text-gray-500">Fill this form before starting the product trial.</p>
                 </div>
               </div>
-              <a href="${sess.productTrialPreSurvey}" target="_blank" rel="noopener noreferrer" class="px-5 py-2 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs transition-colors shrink-0 flex items-center justify-center gap-1.5">
+              <a href="${sess.productTrialPreSurvey}" target="_blank" rel="noopener noreferrer" onclick="updateParticipantCheck('preSurveyFilled', true)" class="px-5 py-2 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs transition-colors shrink-0 flex items-center justify-center gap-1.5">
                 <span>Open Pre-Survey Form</span>
                 <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
               </a>
@@ -802,7 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   <p class="text-xs text-gray-500">Fill this form after testing Gemini with the prompt above.</p>
                 </div>
               </div>
-              <a href="${sess.productTrialFeedback}" target="_blank" rel="noopener noreferrer" class="px-5 py-2 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs transition-colors shrink-0 flex items-center justify-center gap-1.5">
+              <a href="${sess.productTrialFeedback}" target="_blank" rel="noopener noreferrer" onclick="updateParticipantCheck('feedbackFilled', true)" class="px-5 py-2 rounded-xl bg-white border border-[#346BF1] text-[#346BF1] hover:bg-blue-50 text-xs font-bold shadow-xs transition-colors shrink-0 flex items-center justify-center gap-1.5">
                 <span>Open Feedback Form</span>
                 <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
               </a>
@@ -856,21 +861,18 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">
           <div class="flex items-center justify-between pb-3 border-b border-gray-100">
             <div>
-              <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">Verification & Approval</span>
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">Verification & Real-Time Approval</span>
               <h2 class="text-xl font-bold text-gray-900">Request Your Certificate of Participation</h2>
-              <p class="text-xs text-gray-500 mt-1">Your certificate request will be sent to your ambassador for approval. Once approved, the certificate will be emailed to you.</p>
+              <p class="text-xs text-gray-500 mt-1">Your certificate request will be sent in real time to your ambassador (${amb.name}). Once approved, you can download your official certificate and check your email for verification.</p>
             </div>
-            ${canIssue && !part.certificateRequested ? `
-              <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold inline-flex items-center gap-1">
-                <i data-lucide="check" class="w-3.5 h-3.5"></i> Ready to Request
-              </span>
-            ` : part.certificateRequested ? `
-              <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-bold inline-flex items-center gap-1">
-                <i data-lucide="clock" class="w-3.5 h-3.5"></i> ${getCertRequestStatus(part.certificateRequestId)}
+            ${part.certificateRequested ? `
+              <span class="px-3 py-1 rounded-full ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'bg-emerald-100 text-emerald-800' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800 animate-pulse'} text-xs font-bold inline-flex items-center gap-1.5">
+                <i data-lucide="${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'check-circle' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'x-circle' : 'radio'}" class="w-3.5 h-3.5"></i>
+                ${getCertRequestStatus(part.certificateRequestId)}
               </span>
             ` : `
-              <span class="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold inline-flex items-center gap-1">
-                <i data-lucide="lock" class="w-3.5 h-3.5"></i> Surveys Required
+              <span class="px-3 py-1 rounded-full bg-blue-50 text-[#346BF1] border border-blue-100 text-xs font-bold inline-flex items-center gap-1">
+                <i data-lucide="award" class="w-3.5 h-3.5"></i> Ready to Request
               </span>
             `}
           </div>
@@ -882,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <input type="text" id="part-name" value="${part.name}" placeholder="e.g. John Doe" oninput="updateParticipantField('name', this.value)" class="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1]">
             </div>
             <div>
-              <label class="block font-semibold text-gray-700 mb-1">Your Email:</label>
+              <label class="block font-semibold text-gray-700 mb-1">Your Email (Verification & Updates):</label>
               <input type="email" id="part-email" value="${part.email || ''}" placeholder="e.g. you@gmail.com" oninput="updateParticipantField('email', this.value)" class="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1]">
             </div>
             <div>
@@ -894,29 +896,34 @@ document.addEventListener('DOMContentLoaded', () => {
           <!-- Certificate Action -->
           <div class="pt-2">
             ${part.certificateRequested ? `
-              <div class="p-4 rounded-xl ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'bg-emerald-50 border border-emerald-200' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'} space-y-3">
-                <div class="flex items-center gap-2 text-sm font-bold ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'text-emerald-800' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'text-red-800' : 'text-blue-800'}">
-                  <i data-lucide="${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'check-circle' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'x-circle' : 'clock'}" class="w-4 h-4"></i>
-                  ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'Certificate Approved! Check your email for the certificate.' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'Request was not approved. Please contact your ambassador.' : 'Certificate request sent to ' + amb.name + '. Waiting for approval.'}
+              <div class="p-4 rounded-2xl ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'bg-emerald-50 border border-emerald-200' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'bg-red-50 border border-red-200' : 'bg-blue-50/70 border border-blue-200'} space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2 text-sm font-bold ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'text-emerald-800' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'text-red-800' : 'text-blue-800'}">
+                    <i data-lucide="${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'check-circle' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'x-circle' : 'radio'}" class="w-4 h-4"></i>
+                    ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'Certificate Approved by ' + amb.name + '!' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'Request was not approved. Please contact your ambassador.' : 'Request live with ' + amb.name + ' — Awaiting approval...'}
+                  </div>
+                  <span class="text-[10px] font-mono text-gray-500">${part.certificateRequestId}</span>
                 </div>
                 ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? `
-                  <button onclick="generateAndShowCertificate()" class="px-6 py-2.5 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center gap-2">
-                    <i data-lucide="download" class="w-4 h-4"></i> Download Certificate
-                  </button>
+                  <div class="flex flex-wrap gap-2 pt-1">
+                    <button onclick="generateAndShowCertificate()" class="px-6 py-2.5 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center gap-2">
+                      <i data-lucide="download" class="w-4 h-4"></i> Download Certificate
+                    </button>
+                  </div>
                 ` : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? `
                   <button onclick="resetCertRequest()" class="px-5 py-2 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-xs transition-colors">
                     Try Again
                   </button>
-                ` : ''}
+                ` : `
+                  <p class="text-xs text-blue-700">This request is active in real time on ${amb.name}'s Ambassador Dashboard. Once approved, this card will automatically turn green and unlock your certificate download!</p>
+                `}
               </div>
-            ` : canIssue ? `
-              <button onclick="requestCertificate()" class="w-full sm:w-auto px-8 py-3 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2">
-                <i data-lucide="send" class="w-4 h-4"></i> Request Certificate from Ambassador
-              </button>
             ` : `
-              <div class="p-3.5 rounded-xl bg-gray-100 border border-gray-200 text-xs text-gray-500 flex items-center gap-2">
-                <i data-lucide="alert-circle" class="w-4 h-4 text-gray-400 shrink-0"></i>
-                <span>Please complete filling Step 1 (Pre-Survey) and Step 2 (Feedback Form) above, then enter your name and email to request your certificate.</span>
+              <div class="space-y-3">
+                <button onclick="requestCertificate()" class="w-full sm:w-auto px-8 py-3 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer">
+                  <i data-lucide="send" class="w-4 h-4"></i> Request Certificate from Ambassador
+                </button>
+                <p class="text-xs text-gray-500">Clicking will instantly send your request to ${amb.name}'s dashboard in real time.</p>
               </div>
             `}
           </div>
