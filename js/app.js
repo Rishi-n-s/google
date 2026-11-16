@@ -2226,6 +2226,111 @@ ${amb.email || ''}`;
     renderApp();
   };
 
-  // Initial App Render
+  // Real-Time Requests Synchronization
+  async function fetchRequestsFromServer() {
+    try {
+      const res = await fetch('/api/requests', { cache: 'no-store' });
+      if (!res.ok) return;
+      const serverList = await res.json();
+      if (Array.isArray(serverList)) {
+        mergeRequests(serverList);
+      }
+    } catch (e) {
+      // offline or static fallback
+    }
+  }
+
+  function mergeRequests(incomingList) {
+    if (!Array.isArray(incomingList)) return;
+    let changed = false;
+    const local = AppState.certRequests || [];
+    const map = new Map();
+    local.forEach(r => map.set(r.id, r));
+
+    incomingList.forEach(item => {
+      const existing = map.get(item.id);
+      if (!existing || existing.status !== item.status || existing.decidedAt !== item.decidedAt || existing.verificationId !== item.verificationId) {
+        map.set(item.id, item);
+        changed = true;
+      }
+    });
+
+    if (changed || local.length !== map.size) {
+      AppState.certRequests = Array.from(map.values());
+      // Check if current participant's request got approved
+      if (AppState.participant && AppState.participant.certificateRequestId) {
+        const myReq = map.get(AppState.participant.certificateRequestId);
+        if (myReq && myReq.status === 'approved' && !AppState.participant.certificateIssued) {
+          AppState.participant.certificateIssued = true;
+          showToast('Certificate approved by your ambassador!');
+        }
+      }
+      AppState.save();
+      renderApp();
+    }
+  }
+
+  function initRealtimeSync() {
+    // 1. Initial fetch from server
+    fetchRequestsFromServer();
+
+    // 2. Server-Sent Events (SSE) for instant live push
+    if (window.EventSource) {
+      try {
+        const sse = new EventSource('/api/requests/stream');
+        sse.onmessage = function(e) {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'init' && Array.isArray(data.requests)) {
+              mergeRequests(data.requests);
+            }
+          } catch(err) {}
+        };
+        sse.addEventListener('new_request', function(e) {
+          try {
+            const req = JSON.parse(e.data);
+            mergeRequests([req]);
+            if (AppState.role === 'ambassador') {
+              showToast(`New Certificate Request from ${req.participantName}!`);
+            }
+          } catch(err) {}
+        });
+        sse.addEventListener('request_approved', function(e) {
+          try {
+            const req = JSON.parse(e.data);
+            mergeRequests([req]);
+            if (AppState.participant && (AppState.participant.certificateRequestId === req.id || AppState.participant.email === req.participantEmail)) {
+              AppState.participant.certificateIssued = true;
+              AppState.save();
+              renderApp();
+              showToast(`Congratulations! ${req.ambassadorName} approved your certificate!`);
+            }
+          } catch(err) {}
+        });
+        sse.addEventListener('request_rejected', function(e) {
+          try {
+            const req = JSON.parse(e.data);
+            mergeRequests([req]);
+          } catch(err) {}
+        });
+      } catch(e) {}
+    }
+
+    // 3. Polling every 2.5s for 100% guarantee across all browsers & networks
+    setInterval(fetchRequestsFromServer, 2500);
+
+    // 4. Same-browser storage sync
+    window.addEventListener('storage', function(e) {
+      if (e.key === 'GSA_CERT_REQUESTS') {
+        try {
+          AppState.certRequests = JSON.parse(e.newValue || '[]');
+          renderApp();
+        } catch(err) {}
+      }
+    });
+  }
+
+  // Initial App Render & Real-time Boot
   renderApp();
+  initRealtimeSync();
 });
