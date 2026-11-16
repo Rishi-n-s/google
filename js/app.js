@@ -18,11 +18,17 @@ document.addEventListener('DOMContentLoaded', () => {
     participant: JSON.parse(localStorage.getItem('GSA_PARTICIPANT')) || {
       name: '',
       college: '',
+      email: '',
       preSurveyFilled: false,
       trialDone: false,
       feedbackFilled: false,
-      certificateIssued: false
+      certificateIssued: false,
+      certificateRequested: false,
+      certificateRequestId: ''
     },
+
+    // Certificate requests queue (shared via localStorage)
+    certRequests: JSON.parse(localStorage.getItem('GSA_CERT_REQUESTS') || '[]'),
 
     save() {
       localStorage.setItem('GSA_ROLE', this.role);
@@ -37,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('GSA_SELECTED_PROMPT', this.selectedPromptId);
       localStorage.setItem('GSA_SELECTED_AMBASSADOR', this.selectedAmbassadorId);
       localStorage.setItem('GSA_AMBASSADOR_SCORES', JSON.stringify(this.ambassadorScores));
+      localStorage.setItem('GSA_CERT_REQUESTS', JSON.stringify(this.certRequests));
       this.updateHeader();
     },
 
@@ -169,22 +176,26 @@ document.addEventListener('DOMContentLoaded', () => {
   window.submitParticipantLogin = function(event) {
     event.preventDefault();
     const name = document.getElementById('login-participant-name').value.trim();
+    const email = document.getElementById('login-participant-email').value.trim();
     const university = document.getElementById('login-participant-university').value.trim();
-    if (name.length < 2 || university.length < 2) {
+    if (name.length < 2 || university.length < 2 || !email) {
       const error = document.getElementById('login-error');
-      if (error) error.textContent = 'Enter your full name and university to continue.';
+      if (error) error.textContent = 'Enter your full name, email, and university to continue.';
       return;
     }
 
-    AppState.session = { role: 'participant', name, university };
+    AppState.session = { role: 'participant', name, email, university };
     AppState.role = 'participant';
     AppState.participant = {
       name,
       college: university,
+      email,
       preSurveyFilled: false,
       trialDone: false,
       feedbackFilled: false,
-      certificateIssued: false
+      certificateIssued: false,
+      certificateRequested: false,
+      certificateRequestId: ''
     };
     AppState.selectedAmbassadorId = '';
     AppState.currentTab = 'participantHub';
@@ -355,10 +366,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (AppState.role === 'ambassador') {
       // Ambassador navigation
+      const pendingCount = AppState.certRequests.filter(r => r.status === 'pending' && r.ambassadorId === (AppState.session ? AppState.session.ambassadorId : '')).length;
       const items = [
         { id: 'home', label: 'Home' },
         { id: 'about', label: 'About' },
         { id: 'resources', label: 'Resources' },
+        { id: 'requests', label: 'Certificate Requests' + (pendingCount > 0 ? ' (' + pendingCount + ')' : '') },
         { id: 'myscore', label: 'My Score' },
         { id: 'leaderboard', label: 'Leaderboard' }
       ];
@@ -414,6 +427,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <div>
           <label for="login-participant-name" class="block text-sm font-semibold text-gray-800 mb-1.5">Full name</label>
           <input id="login-participant-name" type="text" autocomplete="name" required placeholder="Enter your full name" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div>
+          <label for="login-participant-email" class="block text-sm font-semibold text-gray-800 mb-1.5">Email address</label>
+          <input id="login-participant-email" type="email" autocomplete="email" required placeholder="Enter your email" class="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1] focus:ring-2 focus:ring-blue-100">
         </div>
         <div>
           <label for="login-participant-university" class="block text-sm font-semibold text-gray-800 mb-1.5">University or institute</label>
@@ -511,6 +528,9 @@ document.addEventListener('DOMContentLoaded', () => {
           break;
         case 'resources':
           main.innerHTML = renderResourcesView();
+          break;
+        case 'requests':
+          main.innerHTML = renderCertRequestsView();
           break;
         case 'myscore':
           main.innerHTML = renderScoreView();
@@ -653,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const part = AppState.participant;
     const cur = (window.GSA_DATA.masterPrompts || []).find(p => p.id === AppState.selectedPromptId) || (window.GSA_DATA.masterPrompts||[])[0];
 
-    const canIssue = part.preSurveyFilled && part.feedbackFilled && part.name.trim().length > 1;
+    const canIssue = part.preSurveyFilled && part.feedbackFilled && part.name.trim().length > 1 && (part.email || '').includes('@');
 
     return `
       <div class="max-w-4xl mx-auto space-y-6 pb-16">
@@ -831,16 +851,21 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Section 4: Issue Your Official Certificate -->
+        <!-- Section 4: Request Your Official Certificate -->
         <div class="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-sm space-y-5">
           <div class="flex items-center justify-between pb-3 border-b border-gray-100">
             <div>
-              <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">Verification & Generation</span>
-              <h2 class="text-xl font-bold text-gray-900">Issue Your Certificate of Participation</h2>
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#346BF1] block">Verification & Approval</span>
+              <h2 class="text-xl font-bold text-gray-900">Request Your Certificate of Participation</h2>
+              <p class="text-xs text-gray-500 mt-1">Your certificate request will be sent to your ambassador for approval. Once approved, the certificate will be emailed to you.</p>
             </div>
-            ${canIssue ? `
+            ${canIssue && !part.certificateRequested ? `
               <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold inline-flex items-center gap-1">
-                <i data-lucide="check" class="w-3.5 h-3.5"></i> Ready to Issue
+                <i data-lucide="check" class="w-3.5 h-3.5"></i> Ready to Request
+              </span>
+            ` : part.certificateRequested ? `
+              <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-bold inline-flex items-center gap-1">
+                <i data-lucide="clock" class="w-3.5 h-3.5"></i> ${getCertRequestStatus(part.certificateRequestId)}
               </span>
             ` : `
               <span class="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold inline-flex items-center gap-1">
@@ -850,10 +875,14 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <!-- Participant Identity Form -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             <div>
-              <label class="block font-semibold text-gray-700 mb-1">Your Full Name (As it will appear on Certificate):</label>
+              <label class="block font-semibold text-gray-700 mb-1">Your Full Name (As on Certificate):</label>
               <input type="text" id="part-name" value="${part.name}" placeholder="e.g. John Doe" oninput="updateParticipantField('name', this.value)" class="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1]">
+            </div>
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">Your Email:</label>
+              <input type="email" id="part-email" value="${part.email || ''}" placeholder="e.g. you@gmail.com" oninput="updateParticipantField('email', this.value)" class="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm outline-none focus:border-[#346BF1]">
             </div>
             <div>
               <label class="block font-semibold text-gray-700 mb-1">Your College / Institute:</label>
@@ -863,14 +892,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
           <!-- Certificate Action -->
           <div class="pt-2">
-            ${canIssue ? `
-              <button onclick="generateAndShowCertificate()" class="w-full sm:w-auto px-8 py-3 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2">
-                <i data-lucide="award" class="w-4 h-4"></i> Issue & Download My Certificate
+            ${part.certificateRequested ? `
+              <div class="p-4 rounded-xl ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'bg-emerald-50 border border-emerald-200' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'} space-y-3">
+                <div class="flex items-center gap-2 text-sm font-bold ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'text-emerald-800' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'text-red-800' : 'text-blue-800'}">
+                  <i data-lucide="${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'check-circle' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'x-circle' : 'clock'}" class="w-4 h-4"></i>
+                  ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? 'Certificate Approved! Check your email for the certificate.' : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? 'Request was not approved. Please contact your ambassador.' : 'Certificate request sent to ' + amb.name + '. Waiting for approval.'}
+                </div>
+                ${getCertRequestStatusRaw(part.certificateRequestId) === 'approved' ? `
+                  <button onclick="generateAndShowCertificate()" class="px-6 py-2.5 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center gap-2">
+                    <i data-lucide="download" class="w-4 h-4"></i> Download Certificate
+                  </button>
+                ` : getCertRequestStatusRaw(part.certificateRequestId) === 'rejected' ? `
+                  <button onclick="resetCertRequest()" class="px-5 py-2 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-xs transition-colors">
+                    Try Again
+                  </button>
+                ` : ''}
+              </div>
+            ` : canIssue ? `
+              <button onclick="requestCertificate()" class="w-full sm:w-auto px-8 py-3 rounded-full bg-[#346BF1] hover:bg-[#2851C6] text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2">
+                <i data-lucide="send" class="w-4 h-4"></i> Request Certificate from Ambassador
               </button>
             ` : `
               <div class="p-3.5 rounded-xl bg-gray-100 border border-gray-200 text-xs text-gray-500 flex items-center gap-2">
                 <i data-lucide="alert-circle" class="w-4 h-4 text-gray-400 shrink-0"></i>
-                <span>Please complete filling Step 1 (Pre-Survey) and Step 2 (Feedback Form) above and enter your name to unlock your certificate.</span>
+                <span>Please complete filling Step 1 (Pre-Survey) and Step 2 (Feedback Form) above, then enter your name and email to request your certificate.</span>
               </div>
             `}
           </div>
