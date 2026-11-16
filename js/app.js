@@ -1100,10 +1100,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     showToast(`Request from ${req.participantName} was declined.`);
   };
-    AppState.save();
-    renderApp();
-    showToast(`Request from ${req.participantName} was declined.`);
-  };
 
   window.reopenCertRequest = function(requestId) {
     const req = (AppState.certRequests || []).find(r => r.id === requestId);
